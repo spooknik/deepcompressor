@@ -6,12 +6,19 @@ import typing as tp
 from dataclasses import dataclass, field
 
 import torch
+from diffusers.models import FluxTransformer2DModel, PixArtTransformer2DModel, SD3Transformer2DModel, UNet2DConditionModel
 from diffusers.pipelines import (
     AutoPipelineForText2Image,
     DiffusionPipeline,
     FluxControlPipeline,
     FluxFillPipeline,
+    FluxPipeline,
+    PixArtAlphaPipeline,
+    PixArtSigmaPipeline,
     SanaPipeline,
+    StableDiffusion3Pipeline,
+    StableDiffusionPipeline,
+    StableDiffusionXLPipeline,
 )
 from omniconfig import configclass
 from torch import nn
@@ -66,10 +73,16 @@ class DiffusionPipelineConfig:
             The device of the pipeline.
         shift_activations (`bool`, *optional*, defaults to `False`):
             Whether to shift activations.
+        single_file (`bool`, *optional*, defaults to `False`):
+            Whether to load the transformer/unet from a single safetensors file. When True, loads only the
+            transformer/unet from `path` and other components (VAE, text encoders, etc.) from `hf_repo`.
+        hf_repo (`str`, *optional*, defaults to `""`):
+            HuggingFace repo to load VAE, text encoders, and other components when using single_file=True.
+            Required when `path` is a .safetensors file.
     """
 
     _pipeline_factories: tp.ClassVar[
-        dict[str, tp.Callable[[str, str, torch.dtype, torch.device, bool], DiffusionPipeline]]
+        dict[str, tp.Callable[[str, str, torch.dtype, torch.device, bool, bool, str], DiffusionPipeline]]
     ] = {}
     _text_extractors: tp.ClassVar[
         dict[
@@ -88,6 +101,8 @@ class DiffusionPipelineConfig:
     )
     device: str = "cuda"
     shift_activations: bool = False
+    single_file: bool = False
+    hf_repo: str = ""  # HuggingFace repo to load other components from when using single_file
     lora: LoRAConfig | None = None
     family: str = field(init=False)
     task: str = "text-to-image"
@@ -123,7 +138,8 @@ class DiffusionPipelineConfig:
             device = self.device
         _factory = self._pipeline_factories.get(self.name, self._default_build)
         return _factory(
-            name=self.name, path=self.path, dtype=dtype, device=device, shift_activations=self.shift_activations
+            name=self.name, path=self.path, dtype=dtype, device=device, shift_activations=self.shift_activations,
+            single_file=self.single_file, hf_repo=self.hf_repo
         )
 
     def extract_text_encoders(
@@ -149,7 +165,7 @@ class DiffusionPipelineConfig:
         cls,
         names: str | tuple[str, ...],
         /,
-        factory: tp.Callable[[str, str, torch.dtype, torch.device, bool], DiffusionPipeline],
+        factory: tp.Callable[[str, str, torch.dtype, torch.device, bool, bool, str], DiffusionPipeline],
         *,
         overwrite: bool = False,
     ) -> None:
@@ -158,7 +174,7 @@ class DiffusionPipelineConfig:
         Args:
             names (`str` or `tuple[str, ...]`):
                 The name of the pipeline.
-            factory (`Callable[[str, str,torch.dtype, torch.device, bool], DiffusionPipeline]`):
+            factory (`Callable[[str, str, torch.dtype, torch.device, bool, bool, str], DiffusionPipeline]`):
                 The pipeline factory function.
             overwrite (`bool`, *optional*, defaults to `False`):
                 Whether to overwrite the existing factory for the pipeline.
@@ -325,8 +341,10 @@ class DiffusionPipelineConfig:
 
     @staticmethod
     def _default_build(
-        name: str, path: str, dtype: str | torch.dtype, device: str | torch.device, shift_activations: bool
+        name: str, path: str, dtype: str | torch.dtype, device: str | torch.device, shift_activations: bool,
+        single_file: bool = False, hf_repo: str = ""
     ) -> DiffusionPipeline:
+        # Determine default paths/repos
         if not path:
             if name == "sdxl":
                 path = "stabilityai/stable-diffusion-xl-base-1.0"
@@ -346,19 +364,68 @@ class DiffusionPipelineConfig:
                 path = "black-forest-labs/FLUX.1-schnell"
             else:
                 raise ValueError(f"Path for {name} is not specified.")
-        if name in ["flux.1-canny-dev", "flux.1-depth-dev"]:
-            pipeline = FluxControlPipeline.from_pretrained(path, torch_dtype=dtype)
-        elif name == "flux.1-fill-dev":
-            pipeline = FluxFillPipeline.from_pretrained(path, torch_dtype=dtype)
-        elif name.startswith("sana-"):
-            if dtype == torch.bfloat16:
-                pipeline = SanaPipeline.from_pretrained(path, variant="bf16", torch_dtype=dtype, use_safetensors=True)
-                pipeline.vae.to(dtype)
-                pipeline.text_encoder.to(dtype)
+
+        if single_file:
+            # Load transformer/unet from single file, other components from HF
+            if not hf_repo:
+                # Use same repo as default path for loading other components
+                hf_repo = path if not path.endswith(".safetensors") else None
+                if not hf_repo:
+                    raise ValueError(
+                        f"When using single_file=True with a .safetensors path, you must provide hf_repo "
+                        f"to load VAE, text encoders, and other components."
+                    )
+
+            # Load the full pipeline from HF first, then replace the transformer/unet
+            # Check family name (first part before hyphen) to determine model type
+            family = name.split("-")[0] if "-" in name else name
+
+            if "flux" in name.lower():
+                # Load full pipeline from HF
+                logger = tools.logging.getLogger(__name__)
+                logger.info(f"Loading FLUX pipeline components from HuggingFace: {hf_repo}")
+                pipeline = FluxPipeline.from_pretrained(hf_repo, torch_dtype=dtype)
+                # Replace transformer with custom one from single file
+                logger.info(f"Replacing transformer with custom weights from: {path}")
+                transformer = FluxTransformer2DModel.from_single_file(path, torch_dtype=dtype)
+                pipeline.transformer = transformer.to(device)
+                logger.info(f"✓ Custom transformer loaded successfully from single file")
+            elif "pixart" in name.lower():
+                pipeline_cls = PixArtSigmaPipeline if "sigma" in name.lower() else PixArtAlphaPipeline
+                pipeline = pipeline_cls.from_pretrained(hf_repo, torch_dtype=dtype)
+                transformer = PixArtTransformer2DModel.from_single_file(path, torch_dtype=dtype)
+                pipeline.transformer = transformer.to(device)
+            elif "sd3" in name.lower() or "stable-diffusion-3" in name.lower():
+                pipeline = StableDiffusion3Pipeline.from_pretrained(hf_repo, torch_dtype=dtype)
+                transformer = SD3Transformer2DModel.from_single_file(path, torch_dtype=dtype)
+                pipeline.transformer = transformer.to(device)
+            elif "sdxl" in name.lower() or name in ["sdxl", "sdxl-turbo"]:
+                pipeline = StableDiffusionXLPipeline.from_pretrained(hf_repo, torch_dtype=dtype)
+                unet = UNet2DConditionModel.from_single_file(path, torch_dtype=dtype)
+                pipeline.unet = unet.to(device)
             else:
-                pipeline = SanaPipeline.from_pretrained(path, torch_dtype=dtype)
+                # Default to Stable Diffusion
+                raise ValueError(
+                    f"Cannot determine pipeline type for model name '{name}'. "
+                    f"Please use a recognized model name (flux, pixart, sd3, sdxl, etc.)"
+                )
+
         else:
-            pipeline = AutoPipelineForText2Image.from_pretrained(path, torch_dtype=dtype)
+            # Load from directory (default behavior)
+            if name in ["flux.1-canny-dev", "flux.1-depth-dev"]:
+                pipeline = FluxControlPipeline.from_pretrained(path, torch_dtype=dtype)
+            elif name == "flux.1-fill-dev":
+                pipeline = FluxFillPipeline.from_pretrained(path, torch_dtype=dtype)
+            elif name.startswith("sana-"):
+                if dtype == torch.bfloat16:
+                    pipeline = SanaPipeline.from_pretrained(path, variant="bf16", torch_dtype=dtype, use_safetensors=True)
+                    pipeline.vae.to(dtype)
+                    pipeline.text_encoder.to(dtype)
+                else:
+                    pipeline = SanaPipeline.from_pretrained(path, torch_dtype=dtype)
+            else:
+                pipeline = AutoPipelineForText2Image.from_pretrained(path, torch_dtype=dtype)
+
         pipeline = pipeline.to(device)
         model = pipeline.unet if hasattr(pipeline, "unet") else pipeline.transformer
         replace_fused_linear_with_concat_linear(model)
