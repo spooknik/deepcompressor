@@ -7,8 +7,10 @@ from dataclasses import dataclass, field
 
 import torch
 from diffusers.models import FluxTransformer2DModel, PixArtTransformer2DModel, SD3Transformer2DModel, UNet2DConditionModel
+from diffusers.models.transformers.transformer_chroma import ChromaTransformer2DModel
 from diffusers.pipelines import (
     AutoPipelineForText2Image,
+    ChromaPipeline,
     DiffusionPipeline,
     FluxControlPipeline,
     FluxFillPipeline,
@@ -387,22 +389,57 @@ class DiffusionPipelineConfig:
                 pipeline = FluxPipeline.from_pretrained(hf_repo, torch_dtype=dtype)
                 # Replace transformer with custom one from single file
                 logger.info(f"Replacing transformer with custom weights from: {path}")
-                transformer = FluxTransformer2DModel.from_single_file(path, torch_dtype=dtype)
+                transformer = FluxTransformer2DModel.from_single_file(
+                    path,
+                    config=hf_repo,
+                    subfolder="transformer",
+                    torch_dtype=dtype
+                )
                 pipeline.transformer = transformer.to(device)
                 logger.info(f"✓ Custom transformer loaded successfully from single file")
             elif "pixart" in name.lower():
                 pipeline_cls = PixArtSigmaPipeline if "sigma" in name.lower() else PixArtAlphaPipeline
                 pipeline = pipeline_cls.from_pretrained(hf_repo, torch_dtype=dtype)
-                transformer = PixArtTransformer2DModel.from_single_file(path, torch_dtype=dtype)
+                transformer = PixArtTransformer2DModel.from_single_file(
+                    path,
+                    config=hf_repo,
+                    subfolder="transformer",
+                    torch_dtype=dtype
+                )
                 pipeline.transformer = transformer.to(device)
             elif "sd3" in name.lower() or "stable-diffusion-3" in name.lower():
                 pipeline = StableDiffusion3Pipeline.from_pretrained(hf_repo, torch_dtype=dtype)
-                transformer = SD3Transformer2DModel.from_single_file(path, torch_dtype=dtype)
+                transformer = SD3Transformer2DModel.from_single_file(
+                    path,
+                    config=hf_repo,
+                    subfolder="transformer",
+                    torch_dtype=dtype
+                )
                 pipeline.transformer = transformer.to(device)
             elif "sdxl" in name.lower() or name in ["sdxl", "sdxl-turbo"]:
                 pipeline = StableDiffusionXLPipeline.from_pretrained(hf_repo, torch_dtype=dtype)
-                unet = UNet2DConditionModel.from_single_file(path, torch_dtype=dtype)
+                unet = UNet2DConditionModel.from_single_file(
+                    path,
+                    config=hf_repo,
+                    subfolder="unet",
+                    torch_dtype=dtype
+                )
                 pipeline.unet = unet.to(device)
+            elif "chroma" in name.lower():
+                # Load Chroma pipeline
+                logger = tools.logging.getLogger(__name__)
+                logger.info(f"Loading Chroma pipeline components from HuggingFace: {hf_repo}")
+                pipeline = ChromaPipeline.from_pretrained(hf_repo, torch_dtype=dtype)
+                # Replace transformer with custom one from single file
+                logger.info(f"Replacing transformer with custom weights from: {path}")
+                transformer = ChromaTransformer2DModel.from_single_file(
+                    path,
+                    config=hf_repo,
+                    subfolder="transformer",
+                    torch_dtype=dtype
+                )
+                pipeline.transformer = transformer.to(device)
+                logger.info(f"✓ Custom Chroma transformer loaded successfully from single file")
             else:
                 # Default to Stable Diffusion
                 raise ValueError(
@@ -423,6 +460,8 @@ class DiffusionPipelineConfig:
                     pipeline.text_encoder.to(dtype)
                 else:
                     pipeline = SanaPipeline.from_pretrained(path, torch_dtype=dtype)
+            elif name.startswith("chroma"):
+                pipeline = ChromaPipeline.from_pretrained(path, torch_dtype=dtype)
             else:
                 pipeline = AutoPipelineForText2Image.from_pretrained(path, torch_dtype=dtype)
 

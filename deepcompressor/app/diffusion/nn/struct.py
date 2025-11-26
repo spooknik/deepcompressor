@@ -30,6 +30,11 @@ from diffusers.models.resnet import Downsample2D, ResnetBlock2D, Upsample2D
 from diffusers.models.transformers.pixart_transformer_2d import PixArtTransformer2DModel
 from diffusers.models.transformers.sana_transformer import GLUMBConv, SanaTransformer2DModel, SanaTransformerBlock
 from diffusers.models.transformers.transformer_2d import Transformer2DModel
+from diffusers.models.transformers.transformer_chroma import (
+    ChromaSingleTransformerBlock,
+    ChromaTransformer2DModel,
+    ChromaTransformerBlock,
+)
 from diffusers.models.transformers.transformer_flux import (
     FluxSingleTransformerBlock,
     FluxTransformer2DModel,
@@ -47,6 +52,7 @@ from diffusers.models.unets.unet_2d_blocks import (
 )
 from diffusers.models.unets.unet_2d_condition import UNet2DConditionModel
 from diffusers.pipelines import (
+    ChromaPipeline,
     FluxControlPipeline,
     FluxFillPipeline,
     FluxPipeline,
@@ -84,6 +90,8 @@ DIT_BLOCK_CLS = tp.Union[
     JointTransformerBlock,
     FluxSingleTransformerBlock,
     FluxTransformerBlock,
+    ChromaSingleTransformerBlock,
+    ChromaTransformerBlock,
     SanaTransformerBlock,
 ]
 UNET_BLOCK_CLS = tp.Union[
@@ -99,6 +107,7 @@ DIT_CLS = tp.Union[
     PixArtTransformer2DModel,
     SD3Transformer2DModel,
     FluxTransformer2DModel,
+    ChromaTransformer2DModel,
     SanaTransformer2DModel,
 ]
 UNET_CLS = tp.Union[UNet2DModel, UNet2DConditionModel]
@@ -111,6 +120,7 @@ DIT_PIPELINE_CLS = tp.Union[
     FluxPipeline,
     FluxControlPipeline,
     FluxFillPipeline,
+    ChromaPipeline,
     SanaPipeline,
 ]
 PIPELINE_CLS = tp.Union[UNET_PIPELINE_CLS, DIT_PIPELINE_CLS]
@@ -361,12 +371,16 @@ class DiffusionAttentionStruct(AttentionStruct):
             o_proj = module.to_out[0]
             o_proj_rname = "to_out.0"
             assert isinstance(o_proj, nn.Linear)
-        elif parent is not None:
-            assert isinstance(parent.module, FluxSingleTransformerBlock)
+        elif parent is not None and isinstance(parent.module, FluxSingleTransformerBlock):
             assert isinstance(parent.module.proj_out, ConcatLinear)
             assert len(parent.module.proj_out.linears) == 2
             o_proj = parent.module.proj_out.linears[0]
             o_proj_rname = ".proj_out.linears.0"
+        elif parent is not None and isinstance(parent.module, ChromaSingleTransformerBlock):
+            # Chroma single blocks share proj_out for both attn and mlp outputs
+            # The proj_out takes concatenated [attn_output, mlp_hidden] as input
+            o_proj = parent.module.proj_out
+            o_proj_rname = ".proj_out"
         else:
             raise RuntimeError("Cannot find the output projection.")
         if isinstance(module.processor, DiffusionAttentionProcessor):
@@ -468,7 +482,7 @@ class DiffusionFeedForwardStruct(FeedForwardStruct):
 
     @staticmethod
     def _default_construct(
-        module: FeedForward | FluxSingleTransformerBlock | GLUMBConv,
+        module: FeedForward | FluxSingleTransformerBlock | ChromaSingleTransformerBlock | GLUMBConv,
         /,
         parent: tp.Optional["DiffusionTransformerBlockStruct"] = None,
         fname: str = "",
@@ -507,6 +521,17 @@ class DiffusionFeedForwardStruct(FeedForwardStruct):
             else:
                 down_proj, down_proj_rname = layer_2, "proj_out.linears.1"
             ffn = nn.Sequential(up_proj, module.act_mlp, layer_2)
+            assert not rname, f"Unsupported rname: {rname}"
+        elif isinstance(module, ChromaSingleTransformerBlock):
+            # Chroma single blocks have separate proj_mlp and proj_out
+            # proj_out takes concatenated attn output + mlp hidden states
+            up_proj, up_proj_rname = module.proj_mlp, "proj_mlp"
+            act_type = "gelu"
+            down_proj, down_proj_rname = module.proj_out, "proj_out"
+            if isinstance(down_proj, ShiftedLinear):
+                down_proj, down_proj_rname = down_proj.linear, "proj_out.linear"
+                act_type = "gelu_shifted"
+            ffn = nn.Sequential(up_proj, module.act_mlp, down_proj)
             assert not rname, f"Unsupported rname: {rname}"
         elif isinstance(module, GLUMBConv):
             ffn = module
@@ -696,6 +721,27 @@ class DiffusionTransformerBlockStruct(TransformerBlockStruct, DiffusionBlockStru
             ffn, ffn_rname = module, ""
             pre_add_ffn_norm, pre_add_ffn_norm_rname, add_ffn, add_ffn_rname = None, "", None, ""
         elif isinstance(module, FluxTransformerBlock):
+            parallel = False
+            norm_type = add_norm_type = "ada_norm_zero"
+            pre_attn_norms, pre_attn_norm_rnames = [module.norm1], ["norm1"]
+            attns, attn_rnames = [module.attn], ["attn"]
+            pre_attn_add_norms, pre_attn_add_norm_rnames = [module.norm1_context], ["norm1_context"]
+            pre_ffn_norm, pre_ffn_norm_rname = module.norm2, "norm2"
+            ffn, ffn_rname = module.ff, "ff"
+            pre_add_ffn_norm, pre_add_ffn_norm_rname = module.norm2_context, "norm2_context"
+            add_ffn, add_ffn_rname = module.ff_context, "ff_context"
+        elif isinstance(module, ChromaSingleTransformerBlock):
+            # Chroma single blocks have separate proj_mlp and proj_out (no ConcatLinear)
+            parallel = True
+            norm_type = add_norm_type = "ada_norm_zero_single"
+            pre_attn_norms, pre_attn_norm_rnames = [module.norm], ["norm"]
+            attns, attn_rnames = [module.attn], ["attn"]
+            pre_attn_add_norms, pre_attn_add_norm_rnames = [], []
+            pre_ffn_norm, pre_ffn_norm_rname = module.norm, "norm"
+            ffn, ffn_rname = module, ""  # Use the block itself as the FFN module
+            pre_add_ffn_norm, pre_add_ffn_norm_rname, add_ffn, add_ffn_rname = None, "", None, ""
+        elif isinstance(module, ChromaTransformerBlock):
+            # Chroma joint blocks are similar to FLUX but with pruned norms
             parallel = False
             norm_type = add_norm_type = "ada_norm_zero"
             pre_attn_norms, pre_attn_norm_rnames = [module.norm1], ["norm1"]
@@ -1946,10 +1992,90 @@ class FluxStruct(DiTStruct):
         return {k: v for k, v in key_map.items() if v}
 
 
+@dataclass(kw_only=True)
+class ChromaStruct(FluxStruct):
+    """
+    Struct for ChromaTransformer2DModel.
+
+    Chroma is similar to FLUX but with:
+    - ChromaAdaLayerNormZeroPruned norms instead of AdaLayerNormZero
+    - ChromaCombinedTimestepTextProjEmbeddings for time embedding
+    - A distilled_guidance_layer (ChromaApproximator)
+    - No guidance embedding (guidance_embeds=False)
+    - Single blocks have separate proj_mlp and proj_out (no ConcatLinear)
+    """
+
+    module: ChromaTransformer2DModel = field(repr=False, kw_only=False)
+    """the module of ChromaTransformer2DModel"""
+    # region child modules
+    distilled_guidance_layer: nn.Module  # ChromaApproximator
+    # endregion
+    # region relative names
+    distilled_guidance_layer_rname: str
+    # endregion
+    # region absolute names
+    distilled_guidance_layer_name: str = field(init=False, repr=False)
+    # endregion
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.distilled_guidance_layer_name = join_name(self.name, self.distilled_guidance_layer_rname)
+
+    @staticmethod
+    def _default_construct(
+        module: tp.Union[ChromaPipeline, ChromaTransformer2DModel],
+        /,
+        parent: tp.Optional[BaseModuleStruct] = None,
+        fname: str = "",
+        rname: str = "",
+        rkey: str = "",
+        idx: int = 0,
+        **kwargs,
+    ) -> "ChromaStruct":
+        if isinstance(module, ChromaPipeline):
+            module = module.transformer
+        if isinstance(module, ChromaTransformer2DModel):
+            input_embed, time_embed, text_embed = module.x_embedder, module.time_text_embed, module.context_embedder
+            input_embed_rname, time_embed_rname, text_embed_rname = "x_embedder", "time_text_embed", "context_embedder"
+            distilled_guidance_layer = module.distilled_guidance_layer
+            distilled_guidance_layer_rname = "distilled_guidance_layer"
+            norm_out, norm_out_rname = module.norm_out, "norm_out"
+            proj_out, proj_out_rname = module.proj_out, "proj_out"
+            transformer_blocks, transformer_blocks_rname = module.transformer_blocks, "transformer_blocks"
+            single_transformer_blocks = module.single_transformer_blocks
+            single_transformer_blocks_rname = "single_transformer_blocks"
+            return ChromaStruct(
+                module=module,
+                parent=parent,
+                fname=fname,
+                idx=idx,
+                rname=rname,
+                rkey=rkey,
+                input_embed=input_embed,
+                time_embed=time_embed,
+                text_embed=text_embed,
+                distilled_guidance_layer=distilled_guidance_layer,
+                transformer_blocks=transformer_blocks,
+                single_transformer_blocks=single_transformer_blocks,
+                norm_out=norm_out,
+                proj_out=proj_out,
+                input_embed_rname=input_embed_rname,
+                time_embed_rname=time_embed_rname,
+                text_embed_rname=text_embed_rname,
+                distilled_guidance_layer_rname=distilled_guidance_layer_rname,
+                norm_out_rname=norm_out_rname,
+                proj_out_rname=proj_out_rname,
+                transformer_blocks_rname=transformer_blocks_rname,
+                single_transformer_blocks_rname=single_transformer_blocks_rname,
+            )
+        raise NotImplementedError(f"Unsupported module type: {type(module)}")
+
+
 DiffusionAttentionStruct.register_factory(Attention, DiffusionAttentionStruct._default_construct)
 
 DiffusionFeedForwardStruct.register_factory(
-    (FeedForward, FluxSingleTransformerBlock, GLUMBConv), DiffusionFeedForwardStruct._default_construct
+    (FeedForward, FluxSingleTransformerBlock, ChromaSingleTransformerBlock, GLUMBConv),
+    DiffusionFeedForwardStruct._default_construct,
 )
 
 DiffusionTransformerBlockStruct.register_factory(DIT_BLOCK_CLS, DiffusionTransformerBlockStruct._default_construct)
@@ -1960,6 +2086,10 @@ UNetStruct.register_factory(tp.Union[UNET_PIPELINE_CLS, UNET_CLS], UNetStruct._d
 
 FluxStruct.register_factory(
     tp.Union[FluxPipeline, FluxControlPipeline, FluxTransformer2DModel], FluxStruct._default_construct
+)
+
+ChromaStruct.register_factory(
+    tp.Union[ChromaPipeline, ChromaTransformer2DModel], ChromaStruct._default_construct
 )
 
 DiTStruct.register_factory(tp.Union[DIT_PIPELINE_CLS, DIT_CLS], DiTStruct._default_construct)
