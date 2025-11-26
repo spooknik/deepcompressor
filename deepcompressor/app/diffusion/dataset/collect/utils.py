@@ -11,6 +11,7 @@ from diffusers.models.transformers import (
     PixArtTransformer2DModel,
     SanaTransformer2DModel,
 )
+from diffusers.models.transformers.transformer_chroma import ChromaTransformer2DModel
 from diffusers.models.unets.unet_2d_condition import UNet2DConditionModel
 
 from deepcompressor.utils.common import tree_map, tree_split
@@ -56,7 +57,7 @@ class CollectHook:
             input_kwargs["timestep"] = timesteps
         elif isinstance(module, (PixArtTransformer2DModel, SanaTransformer2DModel)):
             new_args.append(input_kwargs.pop("hidden_states"))
-        elif isinstance(module, FluxTransformer2DModel):
+        elif isinstance(module, (FluxTransformer2DModel, ChromaTransformer2DModel)):
             new_args.append(input_kwargs.pop("hidden_states"))
         else:
             raise ValueError(f"Unknown model: {module}")
