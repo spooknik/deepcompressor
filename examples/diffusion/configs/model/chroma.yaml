@@ -1,12 +1,18 @@
 pipeline:
   name: chroma
   dtype: torch.bfloat16
+  path: lodestones/Chroma1-HD
+  single_file: false
+  hf_repo: lodestones/Chroma1-HD # Hugging Face Repo
+  device: cuda
+
 eval:
   num_steps: 50
   guidance_scale: 1.0  # Chroma doesn't use guidance, but keep at 1.0
   protocol: fmeuler{num_steps}
 quant:
   calib:
+    data: qdiff
     batch_size: 16
   wgts:
     calib_range:

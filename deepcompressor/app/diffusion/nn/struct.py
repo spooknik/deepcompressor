@@ -272,6 +272,10 @@ class DiffusionModelStruct(DiffusionBlockStruct):
             module = module.transformer
         if isinstance(module, UNET_CLS):
             return UNetStruct.construct(module, parent=parent, fname=fname, rname=rname, rkey=rkey, idx=idx, **kwargs)
+        elif isinstance(module, FluxTransformer2DModel):
+            return FluxStruct.construct(module, parent=parent, fname=fname, rname=rname, rkey=rkey, idx=idx, **kwargs)
+        elif isinstance(module, ChromaTransformer2DModel):
+            return ChromaStruct.construct(module, parent=parent, fname=fname, rname=rname, rkey=rkey, idx=idx, **kwargs)
         elif isinstance(module, DIT_CLS):
             return DiTStruct.construct(module, parent=parent, fname=fname, rname=rname, rkey=rkey, idx=idx, **kwargs)
         raise NotImplementedError(f"Unsupported module type: {type(module)}")
