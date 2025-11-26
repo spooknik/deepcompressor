@@ -48,6 +48,8 @@ class DiffusionEvalConfig:
             The number of inference steps.
         guidance_scale (`float`, *optional*, defaults to `None`):
             The guidance scale.
+        negative_prompt (`str`, *optional*, defaults to `None`):
+            The negative prompt to use for all samples. Applied to all benchmark prompts.
         num_samples (`int`, *optional*, defaults to `1024`):
             The number of samples to generate.
         benchmarks (`list[str]`, *optional*, defaults to `["COCO", "DCI", "MJHQ", "GenEval"]`):
@@ -77,6 +79,7 @@ class DiffusionEvalConfig:
     clean_caption: bool | None = None
     num_steps: int | None = None
     guidance_scale: float | None = None
+    negative_prompt: str | None = None
     num_samples: int = 1024
 
     benchmarks: list[str] = field(
@@ -119,6 +122,8 @@ class DiffusionEvalConfig:
             kwargs["num_inference_steps"] = self.num_steps
         if self.guidance_scale is not None:
             kwargs["guidance_scale"] = self.guidance_scale
+        if self.negative_prompt is not None:
+            kwargs["negative_prompt"] = self.negative_prompt
         return kwargs
 
     def _generate(

@@ -7,9 +7,10 @@ pipeline:
   device: cuda
 
 eval:
-  num_steps: 50
-  guidance_scale: 1.0  # Chroma doesn't use guidance, but keep at 1.0
-  protocol: fmeuler{num_steps}
+  num_steps: 40
+  guidance_scale: 3.0  # Chroma recommends 3.0 per HuggingFace README
+  negative_prompt: "low quality, ugly, unfinished, out of focus, deformed, disfigure, blurry, smudged, restricted palette, flat colors"
+  protocol: fmeuler{num_steps}-g{guidance_scale}
 quant:
   calib:
     data: qdiff

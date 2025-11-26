@@ -117,9 +117,10 @@ pipeline:
   name: chroma
   dtype: torch.bfloat16
 eval:
-  num_steps: 50
-  guidance_scale: 1.0  # Chroma doesn't use guidance
-  protocol: fmeuler{num_steps}
+  num_steps: 40
+  guidance_scale: 3.0  # Chroma recommends 3.0 per HuggingFace README
+  negative_prompt: "low quality, ugly, unfinished, out of focus, deformed, disfigure, blurry, smudged, restricted palette, flat colors"
+  protocol: fmeuler{num_steps}-g{guidance_scale}
 quant:
   # ... (same calibration settings as FLUX)
 ```
@@ -170,7 +171,7 @@ For faster quantization (less accurate):
 
 ## Notes
 
-1. **Guidance Scale:** Chroma uses distilled guidance via `ChromaApproximator`, so the `guidance_scale` parameter is not used in the same way as FLUX. Set it to `1.0`.
+1. **Guidance Scale & Negative Prompt:** Unlike FLUX-schnell (which it's based on), Chroma uses CFG with `guidance_scale=3.0` and benefits significantly from a negative prompt. The recommended negative prompt from the HuggingFace model card is: `"low quality, ugly, unfinished, out of focus, deformed, disfigure, blurry, smudged, restricted palette, flat colors"`.
 
 2. **Skip Patterns:** The same skip patterns used for FLUX work for Chroma since they share similar architecture components (embed, transformer_proj_in/out, etc.).
 
