@@ -2,6 +2,14 @@ import torch.nn as nn
 from diffusers.models.attention_processor import Attention
 from diffusers.models.transformers.transformer_flux import FluxSingleTransformerBlock
 
+# Chroma support (requires diffusers >= 0.35.0)
+try:
+    from diffusers.models.transformers.transformer_chroma import ChromaSingleTransformerBlock
+    CHROMA_AVAILABLE = True
+except ImportError:
+    ChromaSingleTransformerBlock = None
+    CHROMA_AVAILABLE = False
+
 from deepcompressor.nn.patch.conv import ConcatConv2d, ShiftedConv2d
 from deepcompressor.nn.patch.linear import ConcatLinear, ShiftedLinear
 from deepcompressor.utils import patch, tools
@@ -55,7 +63,7 @@ def replace_up_block_conv_with_concat_conv(model: nn.Module) -> None:
 
 
 def replace_fused_linear_with_concat_linear(model: nn.Module) -> None:
-    """Replace fused Linear in FluxSingleTransformerBlock with ConcatLinear."""
+    """Replace fused Linear in FluxSingleTransformerBlock/ChromaSingleTransformerBlock with ConcatLinear."""
     logger = tools.logging.getLogger(__name__)
     logger.info("Replacing fused Linear with ConcatLinear.")
     tools.logging.Formatter.indent_inc()
@@ -66,6 +74,15 @@ def replace_fused_linear_with_concat_linear(model: nn.Module) -> None:
             logger.info(f"- in_features = {module.proj_out.out_features}/{module.proj_out.in_features}")
             logger.info(f"- out_features = {module.proj_out.out_features}")
             tools.logging.Formatter.indent_dec()
+            module.proj_out = ConcatLinear.from_linear(module.proj_out, [module.proj_out.out_features])
+        elif CHROMA_AVAILABLE and isinstance(module, ChromaSingleTransformerBlock):
+            logger.info(f"+ Replacing fused Linear in {name} (Chroma) with ConcatLinear.")
+            tools.logging.Formatter.indent_inc()
+            logger.info(f"- in_features = {module.proj_out.out_features}/{module.proj_out.in_features}")
+            logger.info(f"- out_features = {module.proj_out.out_features}")
+            tools.logging.Formatter.indent_dec()
+            # ChromaSingleTransformerBlock.proj_out takes [attn_out, mlp_hidden] concatenated
+            # Split into [attn_out_features, mlp_hidden_features]
             module.proj_out = ConcatLinear.from_linear(module.proj_out, [module.proj_out.out_features])
     tools.logging.Formatter.indent_dec()
 

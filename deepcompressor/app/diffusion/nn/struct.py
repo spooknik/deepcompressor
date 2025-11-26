@@ -36,6 +36,7 @@ from diffusers.models.transformers.transformer_chroma import (
     ChromaTransformerBlock,
 )
 from diffusers.models.transformers.transformer_flux import (
+    FluxAttention,
     FluxSingleTransformerBlock,
     FluxTransformer2DModel,
     FluxTransformerBlock,
@@ -357,7 +358,9 @@ class DiffusionAttentionStruct(AttentionStruct):
         idx: int = 0,
         **kwargs,
     ) -> "DiffusionAttentionStruct":
-        if module.is_cross_attention:
+        # FluxAttention doesn't have is_cross_attention, and is never cross-attention
+        is_cross_attention = getattr(module, "is_cross_attention", False)
+        if is_cross_attention:
             q_proj, k_proj, v_proj = module.to_q, None, None
             add_q_proj, add_k_proj, add_v_proj, add_o_proj = None, module.to_k, module.to_v, None
             q_proj_rname, k_proj_rname, v_proj_rname = "to_q", "", ""
@@ -381,18 +384,28 @@ class DiffusionAttentionStruct(AttentionStruct):
             o_proj = parent.module.proj_out.linears[0]
             o_proj_rname = ".proj_out.linears.0"
         elif parent is not None and isinstance(parent.module, ChromaSingleTransformerBlock):
-            # Chroma single blocks share proj_out for both attn and mlp outputs
-            # The proj_out takes concatenated [attn_output, mlp_hidden] as input
-            o_proj = parent.module.proj_out
-            o_proj_rname = ".proj_out"
+            # Chroma single blocks have proj_out converted to ConcatLinear by replace_fused_linear_with_concat_linear
+            if isinstance(parent.module.proj_out, ConcatLinear):
+                assert len(parent.module.proj_out.linears) == 2
+                o_proj = parent.module.proj_out.linears[0]
+                o_proj_rname = ".proj_out.linears.0"
+            else:
+                # Before conversion - this shouldn't happen in normal flow
+                o_proj = parent.module.proj_out
+                o_proj_rname = ".proj_out"
         else:
             raise RuntimeError("Cannot find the output projection.")
-        if isinstance(module.processor, DiffusionAttentionProcessor):
-            with_rope = module.processor.rope is not None
-        elif module.processor.__class__.__name__.startswith("Flux"):
+        # Determine if RoPE is used - FluxAttention doesn't have processor attribute
+        processor = getattr(module, "processor", None)
+        if processor is not None and isinstance(processor, DiffusionAttentionProcessor):
+            with_rope = processor.rope is not None
+        elif processor is not None and processor.__class__.__name__.startswith("Flux"):
             with_rope = True
+        elif isinstance(module, FluxAttention):
+            with_rope = True  # FluxAttention always uses RoPE
         else:
             with_rope = False  # TODO: fix for other processors
+        linear_attn = processor is not None and isinstance(processor, SanaLinearAttnProcessor2_0)
         config = AttentionConfigStruct(
             hidden_size=q_proj.weight.shape[1],
             add_hidden_size=add_k_proj.weight.shape[1] if add_k_proj is not None else 0,
@@ -401,7 +414,7 @@ class DiffusionAttentionStruct(AttentionStruct):
             num_key_value_heads=module.to_k.weight.shape[0] // (module.to_q.weight.shape[0] // module.heads),
             with_qk_norm=module.norm_q is not None,
             with_rope=with_rope,
-            linear_attn=isinstance(module.processor, SanaLinearAttnProcessor2_0),
+            linear_attn=linear_attn,
         )
         return DiffusionAttentionStruct(
             module=module,
@@ -528,13 +541,23 @@ class DiffusionFeedForwardStruct(FeedForwardStruct):
             assert not rname, f"Unsupported rname: {rname}"
         elif isinstance(module, ChromaSingleTransformerBlock):
             # Chroma single blocks have separate proj_mlp and proj_out
-            # proj_out takes concatenated attn output + mlp hidden states
+            # proj_out is converted to ConcatLinear by replace_fused_linear_with_concat_linear
             up_proj, up_proj_rname = module.proj_mlp, "proj_mlp"
             act_type = "gelu"
-            down_proj, down_proj_rname = module.proj_out, "proj_out"
-            if isinstance(down_proj, ShiftedLinear):
-                down_proj, down_proj_rname = down_proj.linear, "proj_out.linear"
-                act_type = "gelu_shifted"
+            if isinstance(module.proj_out, ConcatLinear):
+                assert len(module.proj_out.linears) == 2
+                layer_2 = module.proj_out.linears[1]
+                if isinstance(layer_2, ShiftedLinear):
+                    down_proj, down_proj_rname = layer_2.linear, "proj_out.linears.1.linear"
+                    act_type = "gelu_shifted"
+                else:
+                    down_proj, down_proj_rname = layer_2, "proj_out.linears.1"
+            else:
+                # Before conversion - shouldn't happen in normal flow
+                down_proj, down_proj_rname = module.proj_out, "proj_out"
+                if isinstance(down_proj, ShiftedLinear):
+                    down_proj, down_proj_rname = down_proj.linear, "proj_out.linear"
+                    act_type = "gelu_shifted"
             ffn = nn.Sequential(up_proj, module.act_mlp, down_proj)
             assert not rname, f"Unsupported rname: {rname}"
         elif isinstance(module, GLUMBConv):
@@ -2076,6 +2099,7 @@ class ChromaStruct(FluxStruct):
 
 
 DiffusionAttentionStruct.register_factory(Attention, DiffusionAttentionStruct._default_construct)
+DiffusionAttentionStruct.register_factory(FluxAttention, DiffusionAttentionStruct._default_construct)
 
 DiffusionFeedForwardStruct.register_factory(
     (FeedForward, FluxSingleTransformerBlock, ChromaSingleTransformerBlock, GLUMBConv),
