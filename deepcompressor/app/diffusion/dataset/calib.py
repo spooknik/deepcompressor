@@ -231,6 +231,9 @@ class DiffusionCalibCacheLoader(BaseCalibCacheLoader):
         # It will be recomputed during layer forward pass
         if "image_rotary_emb" in kwargs:
             kwargs["image_rotary_emb"] = None
+        # attention_mask is also computed based on sequence length
+        if "attention_mask" in kwargs:
+            kwargs["attention_mask"] = None
         if "hidden_states" in kwargs:
             hidden_states = kwargs.pop("hidden_states")
             assert len(args) == 0, f"Invalid args: {args}"
