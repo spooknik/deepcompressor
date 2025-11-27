@@ -1,0 +1,8 @@
+# Very fast calibration data collection - minimal samples
+# Use with very-fast.yaml quant config
+
+collect:
+  root: datasets
+  dataset_name: qdiff-fast
+  data_path: prompts/qdiff.yaml
+  num_samples: 32  # down from 128 - collect fewer calibration samples

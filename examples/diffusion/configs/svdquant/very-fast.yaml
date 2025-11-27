@@ -1,0 +1,50 @@
+# Very fast quantization config - optimized for speed over quality
+# Use this for quick testing or when time is critical
+# Expected ~3-5x faster than fast.yaml, ~10x faster than int4.yaml
+
+quant:
+  # Reduce calibration samples drastically
+  calib:
+    num_samples: 16  # down from 64 in fast.yaml, 128 default
+
+  # Smoothing: minimal grid search
+  smooth:
+    proj:
+      num_grids: 5  # down from 10 in fast.yaml, 20 default
+      allow_low_rank: false  # skip low-rank branch search during smoothing
+
+  # Weight quantization: reduce low-rank iterations
+  wgts:
+    dtype: sint4
+    group_shapes:
+    - - 1
+      - 64
+      - 1
+      - 1
+      - 1
+    scale_dtypes:
+    - null
+    enable_low_rank: true
+    low_rank:
+      rank: 32
+      early_stop: true
+      degree: 2
+      objective: OutputsError
+      num_iters: 25  # down from 100 default - major speedup
+
+  # Input quantization
+  ipts:
+    static: false
+    dtype: sint4
+    group_shapes:
+    - - 1
+      - 64
+      - 1
+      - 1
+      - 1
+    scale_dtypes:
+    - null
+    allow_unsigned: true
+
+pipeline:
+  shift_activations: true
