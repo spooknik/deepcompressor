@@ -12,9 +12,11 @@ import torch.utils.data
 from diffusers.models.attention import JointTransformerBlock
 from diffusers.models.attention_processor import Attention
 from diffusers.models.transformers.transformer_flux import (
+    FluxAttention,
     FluxSingleTransformerBlock,
     FluxTransformerBlock,
 )
+from diffusers.models.transformers.transformer_chroma import ChromaSingleTransformerBlock
 from omniconfig import configclass
 
 from deepcompressor.data.cache import (
@@ -162,7 +164,7 @@ class DiffusionCalibCacheLoader(BaseCalibCacheLoader):
             `IOTensorsCache`:
                 Cache for inputs and outputs.
         """
-        if isinstance(module, FluxSingleTransformerBlock):
+        if isinstance(module, (FluxSingleTransformerBlock, ChromaSingleTransformerBlock)):
             return IOTensorsCache(
                 inputs=TensorsCache(
                     OrderedDict(
@@ -172,7 +174,7 @@ class DiffusionCalibCacheLoader(BaseCalibCacheLoader):
                 ),
                 outputs=TensorCache(channels_dim=-1, reshape=LinearReshapeFn()),
             )
-        elif isinstance(module, Attention):
+        elif isinstance(module, (Attention, FluxAttention)):
             return IOTensorsCache(
                 inputs=TensorsCache(
                     OrderedDict(
