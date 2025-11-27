@@ -174,7 +174,18 @@ class DiffusionCalibCacheLoader(BaseCalibCacheLoader):
                 ),
                 outputs=TensorCache(channels_dim=-1, reshape=LinearReshapeFn()),
             )
-        elif isinstance(module, (Attention, FluxAttention)):
+        elif isinstance(module, FluxAttention):
+            # FluxAttention uses linear projections for Q/K/V
+            return IOTensorsCache(
+                inputs=TensorsCache(
+                    OrderedDict(
+                        hidden_states=TensorCache(channels_dim=-1, reshape=LinearReshapeFn()),
+                        encoder_hidden_states=TensorCache(channels_dim=-1, reshape=LinearReshapeFn()),
+                    ),
+                ),
+                outputs=TensorCache(channels_dim=-1, reshape=LinearReshapeFn()),
+            )
+        elif isinstance(module, Attention):
             return IOTensorsCache(
                 inputs=TensorsCache(
                     OrderedDict(
