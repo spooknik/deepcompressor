@@ -227,6 +227,10 @@ class DiffusionCalibCacheLoader(BaseCalibCacheLoader):
         kwargs = {k: v for k, v in kwargs.items()}  # noqa: C416
         if "res_hidden_states_tuple" in kwargs:
             kwargs["res_hidden_states_tuple"] = None
+        # image_rotary_emb is computed based on hidden_states shape, so we must not cache it
+        # It will be recomputed during layer forward pass
+        if "image_rotary_emb" in kwargs:
+            kwargs["image_rotary_emb"] = None
         if "hidden_states" in kwargs:
             hidden_states = kwargs.pop("hidden_states")
             assert len(args) == 0, f"Invalid args: {args}"
