@@ -18,7 +18,7 @@ NC='\033[0m' # No Color
 # Configuration
 WORKSPACE_DIR="/workspace"
 PYTORCH_VERSION="2.8.0"
-CUDA_VERSION="128"  # CUDA 12.8
+CUDA_VERSION="130"  # CUDA 12.8
 
 print_header() {
     echo ""
@@ -154,7 +154,7 @@ if [ -d "${WORKSPACE_DIR}/deepcompressor" ]; then
     git pull
 else
     print_success "Cloning DeepCompressor..."
-    git clone https://github.com/nunchaku-tech/deepcompressor.git
+    git clone https://github.com/spooknik/deepcompressor.git
     cd ${WORKSPACE_DIR}/deepcompressor
 fi
 
