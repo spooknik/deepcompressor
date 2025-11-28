@@ -161,8 +161,19 @@ class TensorCache:
                 ]
             batch_size = data[0].shape[0]
             if max_size > 0 and batch_size * len(data) > max_size:
-                assert max_size >= batch_size, "max_size must be greater than or equal to batch_size."
-                data = data[:: int(len(data) // (max_size // batch_size))]
+                if max_size < batch_size:
+                    # Further split batches to satisfy max_size constraint
+                    # Ensure new_batch_size is at least 1
+                    new_batch_size = max(1, max_size)
+                    if new_batch_size < batch_size:
+                        data = [
+                            x[i * new_batch_size : (i + 1) * new_batch_size]
+                            for x in data
+                            for i in range(int(batch_size // new_batch_size))
+                        ]
+                        batch_size = data[0].shape[0]
+                if batch_size * len(data) > max_size and max_size >= batch_size:
+                    data = data[:: int(len(data) // (max_size // batch_size))]
         else:
             assert max_size < 0, "max_size must be negative if max_batch_size is negative."
         used_total = data[0].shape[0] * len(data)
