@@ -134,8 +134,12 @@ def ptq(  # noqa: C901
                 load_from = cache.path.smooth
         if save_path:
             if not copy_on_save and load_from:
-                logger.info(f"- Linking smooth scales to {save_path.smooth}")
-                os.symlink(os.path.relpath(load_from, save_dirpath), save_path.smooth)
+                # Skip if load_from and save_path.smooth are the same file
+                if os.path.abspath(load_from) != os.path.abspath(save_path.smooth):
+                    logger.info(f"- Linking smooth scales to {save_path.smooth}")
+                    if os.path.exists(save_path.smooth):
+                        os.remove(save_path.smooth)
+                    os.symlink(os.path.relpath(load_from, save_dirpath), save_path.smooth)
             else:
                 logger.info(f"- Saving smooth scales to {save_path.smooth}")
                 torch.save(smooth_cache, save_path.smooth)
