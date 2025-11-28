@@ -226,10 +226,10 @@ fi
 # ============================================================================
 print_step "7/14" "Setting exact package versions in pyproject.toml..."
 
-# Set datasets version
+# Set datasets version (v2.x required for custom dataset loading scripts)
 if grep -q "^datasets = " pyproject.toml; then
-    sed -i 's/^datasets = .*/datasets = ">=3.0.0"/' pyproject.toml
-    print_success "Set datasets>=3.0.0"
+    sed -i 's/^datasets = .*/datasets = ">=2.16.0,<3.0.0"/' pyproject.toml
+    print_success "Set datasets>=2.16.0,<3.0.0 (v2.x for custom loading scripts)"
 fi
 
 # Set diffusers version (>= 0.35.0 required for Chroma support)
@@ -248,6 +248,32 @@ fi
 if grep -q "^peft = " pyproject.toml; then
     sed -i 's/^peft = .*/peft = ">=0.14.0"/' pyproject.toml
     print_success "Set peft>=0.14.0"
+fi
+
+# Set torch version (< 2.9.0 to avoid torchaudio conflicts)
+if grep -q "^torch = " pyproject.toml; then
+    sed -i 's/^torch = .*/torch = ">=2.5.0,<2.9.0"/' pyproject.toml
+    print_success "Set torch>=2.5.0,<2.9.0"
+fi
+
+# Add numpy constraint (< 2.3.0 for opencv-python compatibility)
+if ! grep -q "^numpy = " pyproject.toml; then
+    # Add numpy before image_reward line
+    sed -i '/^clip = /a numpy = ">=2.0.0,<2.3.0"' pyproject.toml
+    print_success "Added numpy>=2.0.0,<2.3.0"
+elif grep -q "^numpy = " pyproject.toml; then
+    sed -i 's/^numpy = .*/numpy = ">=2.0.0,<2.3.0"/' pyproject.toml
+    print_success "Set numpy>=2.0.0,<2.3.0"
+fi
+
+# Add huggingface-hub constraint (< 1.0 for transformers compatibility)
+if ! grep -q "^huggingface-hub = " pyproject.toml; then
+    # Add huggingface-hub before image_reward line
+    sed -i '/^clip = /a huggingface-hub = ">=0.34.0,<1.0"' pyproject.toml
+    print_success "Added huggingface-hub>=0.34.0,<1.0"
+elif grep -q "^huggingface-hub = " pyproject.toml; then
+    sed -i 's/^huggingface-hub = .*/huggingface-hub = ">=0.34.0,<1.0"/' pyproject.toml
+    print_success "Set huggingface-hub>=0.34.0,<1.0"
 fi
 
 print_success "Package versions configured"
