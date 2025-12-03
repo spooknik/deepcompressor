@@ -1,0 +1,84 @@
+pipeline:
+  name: chroma
+  dtype: torch.bfloat16
+  path: lodestones/Chroma1-HD
+  single_file: false
+  device: cuda
+eval:
+  num_steps: 35
+  guidance_scale: 3.0  # Chroma doesn't use guidance, but keep at 1.0
+  negative_prompt: "low quality, ugly, unfinished, out of focus, deformed, disfigure, blurry, smudged, restricted palette, flat colors"
+  protocol: fmeuler{num_steps}-g{guidance_scale}
+  num_samples: 4  # 
+  gen_root: "{output}/{job}"
+  ref_root: baselines/{dtype}/{model}/{protocol}
+  control_root: "benchmarks"
+  gt_stats_root: benchmarks/stats
+  batch_size_per_gpu: 1 # Unstable if set higher, little time savings if increased
+  benchmarks:
+    - "MJHQ"
+
+quant:
+  calib:
+    batch_size: 32
+    path: datasets/torch.bfloat16/chroma/fmeuler35-g3.0/qdiff/s128
+    num_samples: 
+    num_workers: 8 #untested 
+  
+  wgts:
+    calib_range:
+      element_batch_size: 32
+      sample_batch_size: 32
+      element_size: 512
+      sample_size: 32
+      
+    low_rank:
+      sample_batch_size: 32
+      sample_size: 8 # Takes a long time at -1. 32 or 64 quicker.
+      
+    skips: 
+    - embed
+    - resblock_shortcut
+    - resblock_time_proj
+    - transformer_proj_in
+    - transformer_proj_out
+    - down_sample
+    - up_sample
+    
+  ipts:
+    calib_range:
+      element_batch_size: 32
+      sample_batch_size: 32
+      element_size: 512
+      sample_size: 32
+      
+    skips: 
+    - embed
+    - resblock_shortcut
+    - resblock_time_proj
+    - transformer_proj_in
+    - transformer_proj_out
+    - transformer_norm
+    - transformer_add_norm
+    - down_sample
+    - up_sample
+    
+  opts:
+    calib_range:
+      element_batch_size: 32
+      sample_batch_size: 32
+      element_size: 512
+      sample_size: 32
+
+      
+  smooth:
+    proj:
+      element_batch_size: 32
+      sample_batch_size: 32
+      element_size: 32
+      sample_size: 32
+      outputs_device: cuda
+      
+    attn:
+      sample_batch_size: 16
+      sample_size: 32

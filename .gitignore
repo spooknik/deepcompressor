@@ -190,4 +190,5 @@ examples/diffusion/configs/model/sdxl.yaml
 examples/diffusion/configs/model/sdxl-custom.yaml
 CLAUDE.md
 .claude/settings.local.json
-/configs
+docs/smoothing-speedup-plan.md
+configs/Untitled.ipynb

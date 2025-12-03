@@ -1,0 +1,10 @@
+quant:
+  smooth:
+    proj:
+      strategy: GridSearch
+      num_grids: 5
+      beta: -1
+      sample_batch_size: 16
+      sample_size: 96
+  calib:
+    num_samples: 32
