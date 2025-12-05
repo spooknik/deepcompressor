@@ -293,6 +293,10 @@ class DiffusionModelStruct(DiffusionBlockStruct):
             key_map[rkey].update(keys)
         for rkey, keys in flux_key_map.items():
             key_map[rkey].update(keys)
+        # Add Chroma-specific keys for distilled_guidance_layer (ChromaApproximator)
+        # This is critical for quality as it controls all modulation in Chroma models
+        key_map["distilled_guidance"] = {"distilled_guidance_layer"}
+        key_map["distilled_guidance_layer"] = {"distilled_guidance_layer"}
         return {k: v for k, v in key_map.items() if v}
 
     @staticmethod
@@ -2096,16 +2100,6 @@ class ChromaStruct(FluxStruct):
                 single_transformer_blocks_rname=single_transformer_blocks_rname,
             )
         raise NotImplementedError(f"Unsupported module type: {type(module)}")
-
-    @classmethod
-    def _get_default_key_map(cls) -> dict[str, set[str]]:
-        """Get the default allowed keys, including distilled_guidance for Chroma."""
-        key_map = super()._get_default_key_map()
-        # Add distilled_guidance_layer as a skip key for Chroma
-        # This allows skipping the ChromaApproximator which is critical for quality
-        key_map["distilled_guidance"] = {"distilled_guidance_layer"}
-        key_map["distilled_guidance_layer"] = {"distilled_guidance_layer"}
-        return key_map
 
 
 DiffusionAttentionStruct.register_factory(Attention, DiffusionAttentionStruct._default_construct)
