@@ -1,0 +1,29 @@
+# CUDA optimization config - keeps calibration outputs on GPU for faster processing
+# Requires sufficient VRAM (~24GB+ recommended)
+
+quant:
+  smooth:
+    proj:
+      outputs_device: cuda
+    attn:
+      outputs_device: cuda
+
+  wgts:
+    calib_range:
+      outputs_device: cuda
+    low_rank:
+      outputs_device: cuda
+
+  ipts:
+    calib_range:
+      outputs_device: cuda
+
+  opts:
+    calib_range:
+      outputs_device: cuda
+
+  extra_wgts:
+    calib_range:
+      outputs_device: cuda
+    low_rank:
+      outputs_device: cuda

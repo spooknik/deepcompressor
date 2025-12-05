@@ -2097,6 +2097,16 @@ class ChromaStruct(FluxStruct):
             )
         raise NotImplementedError(f"Unsupported module type: {type(module)}")
 
+    @classmethod
+    def _get_default_key_map(cls) -> dict[str, set[str]]:
+        """Get the default allowed keys, including distilled_guidance for Chroma."""
+        key_map = super()._get_default_key_map()
+        # Add distilled_guidance_layer as a skip key for Chroma
+        # This allows skipping the ChromaApproximator which is critical for quality
+        key_map["distilled_guidance"] = {"distilled_guidance_layer"}
+        key_map["distilled_guidance_layer"] = {"distilled_guidance_layer"}
+        return key_map
+
 
 DiffusionAttentionStruct.register_factory(Attention, DiffusionAttentionStruct._default_construct)
 DiffusionAttentionStruct.register_factory(FluxAttention, DiffusionAttentionStruct._default_construct)

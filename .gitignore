@@ -192,3 +192,4 @@ CLAUDE.md
 .claude/settings.local.json
 docs/smoothing-speedup-plan.md
 configs/Untitled.ipynb
+chroma_v10HD.safetensors

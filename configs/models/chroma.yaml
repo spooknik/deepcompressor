@@ -5,11 +5,11 @@ pipeline:
   single_file: false
   device: cuda
 eval:
-  num_steps: 35
-  guidance_scale: 5.0  # Chroma doesn't use guidance, but keep at 1.0
+  num_steps: 40
+  guidance_scale: 3.5
   negative_prompt: "low quality, ugly, unfinished, out of focus, deformed, disfigure, blurry, smudged, restricted palette, flat colors"
   protocol: fmeuler{num_steps}-g{guidance_scale}
-  num_samples: 4  # 
+  num_samples: 128  # 
   gen_root: "{output}/{job}"
   ref_root: baselines/{dtype}/{model}/{protocol}
   control_root: "benchmarks"
@@ -21,9 +21,11 @@ eval:
 quant:
   calib:
     batch_size: 4
-    path: datasets/torch.bfloat16/chroma/fmeuler35-g5.0/qdiff-fast/s32
+    path: datasets/torch.bfloat16/chroma/fmeuler40-g3.5/qdiff/s128
     num_samples: 128
-    num_workers: 8 #untested 
+    num_workers: 8
+    sample_size: 128 # untested
+    sample_batch_size: 16 # untested
   
   wgts:
     calib_range:
